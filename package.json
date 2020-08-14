@@ -1,0 +1,40 @@
+{
+  "name": "ethereum-gas-station-backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "start": "NODE_ENV=development DOTENV_CONFIG_PATH=./.env.prod node -r dotenv/config server.js",
+    "dev": "NODE_ENV=development DOTENV_CONFIG_PATH=./.env.dev nodemon -r dotenv/config server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/harry830622/ethereum-gas-station-backend.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/harry830622/ethereum-gas-station-backend/issues"
+  },
+  "homepage": "https://github.com/harry830622/ethereum-gas-station-backend#readme",
+  "dependencies": {
+    "@koa/router": "^9.4.0",
+    "axios": "^0.19.2",
+    "dotenv": "^8.2.0",
+    "koa": "^2.13.0",
+    "koa-body": "^4.2.0",
+    "koa-logger": "^3.2.1",
+    "mongoose": "^5.10.0"
+  },
+  "devDependencies": {
+    "eslint": "7.2.0",
+    "eslint-config-airbnb-base": "14.2.0",
+    "eslint-config-prettier": "^6.11.0",
+    "eslint-plugin-import": "^2.21.2",
+    "eslint-plugin-prettier": "^3.1.4",
+    "husky": "^4.2.5",
+    "lint-staged": "^10.2.11",
+    "nodemon": "^2.0.4",
+    "prettier": "^2.0.5"
+  }
+}
