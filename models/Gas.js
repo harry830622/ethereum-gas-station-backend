@@ -4,14 +4,17 @@ const { Schema } = mongoose;
 
 const gasSchema = new Schema(
   {
-    fastest: { type: Schema.Types.Number, required: true },
-    fast: { type: Schema.Types.Number, required: true },
-    average: { type: Schema.Types.Number, required: true },
-    safeLow: { type: Schema.Types.Number, required: true },
-    fastestWait: { type: Schema.Types.Number, required: true },
-    fastWait: { type: Schema.Types.Number, required: true },
-    averageWait: { type: Schema.Types.Number, required: true },
-    safeLowWait: { type: Schema.Types.Number, required: true },
+    price: { type: Schema.Types.Map, of: Schema.Types.Number, required: true },
+    limit: {
+      type: Schema.Types.Map,
+      of: { type: Schema.Types.Map, of: Schema.Types.Number },
+      required: true,
+    },
+    waitTimeInSec: {
+      type: Schema.Types.Map,
+      of: Schema.Types.Number,
+      required: true,
+    },
   },
   { timestamps: true },
 );

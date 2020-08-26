@@ -24,7 +24,8 @@
     "koa": "^2.13.0",
     "koa-body": "^4.2.0",
     "koa-logger": "^3.2.1",
-    "mongoose": "^5.10.0"
+    "mongoose": "^5.10.0",
+    "web3": "^1.2.11"
   },
   "devDependencies": {
     "eslint": "7.2.0",

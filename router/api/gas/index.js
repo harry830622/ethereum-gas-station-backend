@@ -14,7 +14,12 @@ gasRouter.get('/', async (ctx) => {
       ctx.throw(404, err.message);
     });
   ctx.status = 200;
-  ctx.body = gass;
+  ctx.body = gass.map((gas) => ({
+    price: gas.price,
+    limit: gas.limit,
+    waitTimeInSec: gas.waitTimeInSec,
+    createdAt: gas.createdAt,
+  }));
 });
 
 gasRouter.get('/now', async (ctx) => {
@@ -23,14 +28,18 @@ gasRouter.get('/now', async (ctx) => {
   );
   ctx.status = 200;
   ctx.body = {
-    fastest: res.data.fastest / 10,
-    fast: res.data.fast / 10,
-    average: res.data.average / 10,
-    safeLow: res.data.safeLow / 10,
-    fastestWait: res.data.fastestWait * 60,
-    fastWait: res.data.fastWait * 60,
-    averageWait: res.data.avgWait * 60,
-    safeLowWait: res.data.safeLowWait * 60,
+    price: {
+      fastest: res.data.fastest / 10,
+      fast: res.data.fast / 10,
+      average: res.data.average / 10,
+      safeLow: res.data.safeLow / 10,
+    },
+    waitTimeInSec: {
+      fastestWait: res.data.fastestWait * 60,
+      fastWait: res.data.fastWait * 60,
+      averageWait: res.data.avgWait * 60,
+      safeLowWait: res.data.safeLowWait * 60,
+    },
   };
 });
 
