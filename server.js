@@ -1,6 +1,7 @@
 const Koa = require('koa');
 const logger = require('koa-logger');
 const bodyParser = require('koa-body');
+const cors = require('@koa/cors');
 const mongoose = require('mongoose');
 const axios = require('axios').default;
 const Web3 = require('web3');
@@ -11,7 +12,7 @@ const Gas = require('./models/Gas');
 const Contract = require('./models/Contract');
 
 const {
-  PORT,
+  PORT = '3000',
   GET_GAS_FREQ_IN_SEC,
   MONGODB_URI,
   INFURA_API_URL,
@@ -27,12 +28,12 @@ const {
   const server = new Koa();
 
   server.use(logger());
+  server.use(cors());
   server.use(bodyParser());
 
   server.use(router.routes());
 
-  const port = PORT ? parseInt(PORT, 10) : 5000;
-  server.listen(port);
+  server.listen(parseInt(PORT, 10));
 
   const web3 = new Web3(INFURA_API_URL);
 
