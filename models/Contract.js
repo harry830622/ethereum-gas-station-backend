@@ -7,7 +7,6 @@ const contractSchema = new Schema(
     address: { type: Schema.Types.String, required: true, unique: true },
     name: { type: Schema.Types.String, required: true, unique: true },
     abi: { type: Schema.Types.String, required: true },
-    displayName: { type: Schema.Types.String },
   },
   { timestamps: true },
 );

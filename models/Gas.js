@@ -19,6 +19,8 @@ const gasSchema = new Schema(
   { timestamps: true },
 );
 
+gasSchema.index({ createdAt: -1 });
+
 const Gas = mongoose.model('Gas', gasSchema);
 
 module.exports = Gas;

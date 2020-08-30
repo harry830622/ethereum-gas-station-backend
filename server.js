@@ -73,6 +73,13 @@ const {
         add_liquidity: 0,
         remove_liquidity: 0,
       },
+      curveDao__gauge__yCrv: {
+        deposit: 0,
+        withdraw: 0,
+      },
+      curveDao__minter: {
+        mint: 0,
+      },
     };
     await Promise.all(
       Object.entries(limitByMethodByContractName).map(
