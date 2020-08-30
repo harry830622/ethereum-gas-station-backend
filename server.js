@@ -123,6 +123,7 @@ const {
   if (res) {
     timeout = startTime - Date.parse(res.createdAt);
   }
+  getGas();
   setTimeout(() => {
     getGas();
     setInterval(getGas, parseInt(GET_GAS_FREQ_IN_SEC, 10) * 1000);
