@@ -75,10 +75,6 @@ const methodsByContractName = {
       slow: Math.ceil(res.data.data.list[3].gasPrice * 1e-9),
     });
     await gasPrice.save();
-
-    setTimeout(() => {
-      getGasPrice();
-    }, parseInt(GET_GAS_PRICE_FREQ_IN_SEC, 10) * 1000);
   };
 
   const getGasUsed = async () => {
@@ -161,12 +157,11 @@ const methodsByContractName = {
         );
       }),
     );
-
-    setTimeout(() => {
-      getGasUsed();
-    }, parseInt(GET_GAS_USED_FREQ_IN_SEC, 10) * 1000);
   };
 
   getGasPrice();
   getGasUsed();
+
+  setInterval(getGasPrice, parseInt(GET_GAS_PRICE_FREQ_IN_SEC, 10) * 1000);
+  setInterval(getGasUsed, parseInt(GET_GAS_USED_FREQ_IN_SEC, 10) * 1000);
 })();
