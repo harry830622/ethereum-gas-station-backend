@@ -6,20 +6,25 @@ const cors = require('@koa/cors');
 const mongoose = require('mongoose');
 const axios = require('axios').default;
 const Web3 = require('web3');
+const mailgun = require('mailgun-js');
 
 const router = require('./router');
 
 const GasPrice = require('./models/GasPrice');
 const GasUsed = require('./models/GasUsed');
 const Contract = require('./models/Contract');
+const User = require('./models/User');
 
 const {
   PORT = '3000',
-  GET_GAS_PRICE_FREQ_IN_SEC,
-  GET_GAS_USED_FREQ_IN_SEC,
+  GET_GAS_PRICE_PERIOD_IN_SEC,
+  GET_GAS_USED_PERIOD_IN_SEC,
+  CHECK_LOWEST_GAS_PERIOD_IN_SEC,
   MONGODB_URI,
   INFURA_API_URL,
   ETHERSCAN_API_KEY,
+  MAILGUN_API_KEY,
+  MAILGUN_DOMAIN,
 } = process.env;
 
 const methodsByContractName = {
@@ -40,6 +45,8 @@ const methodsByContractName = {
 (async () => {
   mongoose.connect(MONGODB_URI);
 
+  const mg = mailgun({ apiKey: MAILGUN_API_KEY, domain: MAILGUN_DOMAIN });
+
   const server = new Koa();
 
   server.use(logger());
@@ -53,7 +60,7 @@ const methodsByContractName = {
   const web3 = new Web3(INFURA_API_URL);
 
   let res;
-  res = await Contract.find({}).exec();
+  res = await Contract.find({}).exec().catch(console.log);
   const contractByName = res.reduce(
     (prev, curr) => ({
       ...prev,
@@ -68,13 +75,12 @@ const methodsByContractName = {
         rejectUnauthorized: false,
       }),
     });
-    const gasPrice = new GasPrice({
+    await GasPrice.create({
       instant: Math.ceil(res.data.data.list[0].gasPrice * 1e-9),
       fast: Math.ceil(res.data.data.list[1].gasPrice * 1e-9),
       standard: Math.ceil(res.data.data.list[2].gasPrice * 1e-9),
       slow: Math.ceil(res.data.data.list[3].gasPrice * 1e-9),
-    });
-    await gasPrice.save();
+    }).catch(console.log);
   };
 
   const getGasUsed = async () => {
@@ -111,7 +117,6 @@ const methodsByContractName = {
           }),
           {},
         );
-        const now = Date.now();
         res.data.result.forEach((tx) => {
           const method = methodBySig[tx.input.slice(0, 10)];
           if (!methods.includes(method)) {
@@ -127,7 +132,8 @@ const methodsByContractName = {
             txs.forEach((tx) => {
               if (
                 parseInt(tx.timeStamp, 10) <
-                Math.ceil(now / 1000) - parseInt(GET_GAS_USED_FREQ_IN_SEC, 10)
+                Math.ceil(Date.now() / 1000) -
+                  parseInt(GET_GAS_USED_PERIOD_IN_SEC, 10)
               ) {
                 return;
               }
@@ -147,21 +153,103 @@ const methodsByContractName = {
               return;
             }
             const avgGasUsed = Math.ceil(sum / count);
-            const gasUsed = new GasUsed({
+            await GasUsed.create({
               contract: contract._id,
               method,
               amount: avgGasUsed,
-            });
-            await gasUsed.save();
+            }).catch(console.log);
           }),
         );
       }),
     );
   };
 
+  const sendNotifications = async (gasPrice) => {
+    const users = await User.find({}).exec().catch(console.log);
+    const emails = users
+      .filter((u) => u.isToNotifyWhen24HLow)
+      .map((u) => u.email);
+    await Promise.all(
+      emails.map((email) =>
+        new Promise((resolve) => {
+          mg.messages().send(
+            {
+              from: 'Feel the Fee <contact@mg.fee.finance>',
+              to: email,
+              subject: `⛽ ${gasPrice} Gwei | Time to get some cheap gas!`,
+              text: `The gas price now (${gasPrice} Gwei) is the lowest of the last 24 hours!`,
+            },
+            (err) => {
+              if (err) {
+                throw err;
+              }
+              resolve();
+            },
+          );
+        }).catch(console.log),
+      ),
+    );
+  };
+
+  let lowest = 1e9;
+  const checkLowestGas = async () => {
+    const now = new Date();
+    if (now.getHours() === 0) {
+      lowest = 1e9;
+    }
+    const gasPrices = await GasPrice.find({})
+      .sort({ createdAt: -1 })
+      .limit(
+        Math.ceil(CHECK_LOWEST_GAS_PERIOD_IN_SEC / GET_GAS_PRICE_PERIOD_IN_SEC),
+      )
+      .exec()
+      .catch(console.log);
+    let isLowest = false;
+    gasPrices.forEach((p) => {
+      if (p.standard < lowest) {
+        lowest = p.standard;
+        isLowest = true;
+      }
+    });
+    if (isLowest) {
+      sendNotifications(lowest);
+    }
+  };
+
   getGasPrice();
   getGasUsed();
 
-  setInterval(getGasPrice, parseInt(GET_GAS_PRICE_FREQ_IN_SEC, 10) * 1000);
-  setInterval(getGasUsed, parseInt(GET_GAS_USED_FREQ_IN_SEC, 10) * 1000);
+  const now = new Date();
+  let startTime;
+  startTime = new Date(now);
+  startTime.setMinutes(now.getMinutes() + 1);
+  startTime.setSeconds(0);
+  startTime.setMilliseconds(0);
+  setTimeout(() => {
+    getGasPrice();
+    setInterval(getGasPrice, parseInt(GET_GAS_PRICE_PERIOD_IN_SEC, 10) * 1000);
+  }, startTime.valueOf() - now.valueOf());
+
+  startTime = new Date(now);
+  startTime.setHours(now.getHours() + 1);
+  startTime.setMinutes(0);
+  startTime.setSeconds(0);
+  startTime.setMilliseconds(0);
+  setTimeout(() => {
+    getGasUsed();
+    setInterval(getGasUsed, parseInt(GET_GAS_USED_PERIOD_IN_SEC, 10) * 1000);
+  }, startTime.valueOf() - now.valueOf());
+
+  startTime = new Date(now);
+  startTime.setHours(now.getHours() + 1);
+  startTime.setMinutes(0);
+  startTime.setSeconds(0);
+  startTime.setMilliseconds(0);
+  setTimeout(() => {
+    checkLowestGas();
+    setInterval(
+      checkLowestGas,
+      parseInt(CHECK_LOWEST_GAS_PERIOD_IN_SEC, 10) * 1000,
+    );
+  }, startTime.valueOf() - now.valueOf());
 })();
