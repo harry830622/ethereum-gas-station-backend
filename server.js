@@ -191,12 +191,10 @@ const methodsByContractName = {
     );
   };
 
-  let lowest = 1e9;
+  let lowestLast24H = 1e9;
+  let isFirst = true;
   const checkLowestGas = async () => {
     const now = new Date();
-    if (now.getHours() === 0) {
-      lowest = 1e9;
-    }
     const gasPrices = await GasPrice.find({})
       .sort({ createdAt: -1 })
       .limit(
@@ -204,14 +202,19 @@ const methodsByContractName = {
       )
       .exec()
       .catch(console.log);
-    let isLowest = false;
+    let lowest = 1e9;
     gasPrices.forEach((p) => {
-      if (p.standard < lowest) {
-        lowest = p.standard;
-        isLowest = true;
+      if (p.fast < lowest) {
+        lowest = p.fast;
       }
     });
-    if (isLowest) {
+    if (now.getHours() === 0) {
+      lowestLast24H = lowest;
+    } else if (isFirst) {
+      lowestLast24H = lowest;
+      isFirst = false;
+    } else if (lowest < lowestLast24H) {
+      lowestLast24H = lowest;
       sendNotifications(lowest);
     }
   };
@@ -222,7 +225,8 @@ const methodsByContractName = {
   const now = new Date();
   let startTime;
   startTime = new Date(now);
-  startTime.setMinutes(now.getMinutes() + 1);
+  startTime.setHours(now.getHours() + 1);
+  startTime.setMinutes(0);
   startTime.setSeconds(0);
   startTime.setMilliseconds(0);
   setTimeout(() => {
