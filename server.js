@@ -29,14 +29,36 @@ const {
 
 const methodsByContractName = {
   yearn__vault__yCrv: ['deposit', 'withdraw'],
+  yearn__vault__weth: ['deposit', 'withdraw'],
+  yearn__vault__yfi: ['deposit', 'withdraw'],
+  yearn__vault__yBCrv: ['deposit', 'withdraw'],
+  yearn__vault__crvRenWSBtc: ['deposit', 'withdraw'],
+  yearn__vault__dai: ['deposit', 'withdraw'],
+  yearn__vault__tusd: ['deposit', 'withdraw'],
+  yearn__vault__usdc: ['deposit', 'withdraw'],
+  yearn__vault__usdt: ['deposit', 'withdraw'],
+  yearn__vault__aLink: ['deposit', 'withdraw'],
   curve__pool__y: ['add_liquidity', 'remove_liquidity'],
+  curve__pool__compound: ['add_liquidity', 'remove_liquidity'],
+  curve__pool__pax: ['add_liquidity', 'remove_liquidity'],
+  curve__pool__bUsd: ['add_liquidity', 'remove_liquidity'],
+  curve__pool__sUsd: ['add_liquidity', 'remove_liquidity'],
+  curve__pool__renBtc: ['mintThenDeposit', 'removeLiquidityThenBurn'],
+  curve__pool__sBtc: ['mintThenDeposit', 'removeLiquidityThenBurn'],
   curveDao__gauge__yCrv: ['deposit', 'withdraw'],
+  curveDao__gauge__cCrv: ['deposit', 'withdraw'],
+  curveDao__gauge__yBCrv: ['deposit', 'withdraw'],
+  curveDao__gauge__crvPlain3AndSUsd: ['deposit', 'withdraw'],
+  curveDao__gauge__yPaxCrv: ['deposit', 'withdraw'],
+  curveDao__gauge__crvRenWBtc: ['deposit', 'withdraw'],
+  curveDao__gauge__crvRenWSBtc: ['deposit', 'withdraw'],
   curveDao__minter: ['mint'],
   uniswap__router: [
     'swapExactETHForTokens',
     'addLiquidityETH',
     'removeLiquidityETH',
   ],
+  sushiswap__pool: ['deposit', 'withdraw'],
   weth: ['transfer', 'approve'],
   usdt: ['transfer', 'approve'],
   dai: ['transfer', 'approve'],
@@ -60,7 +82,7 @@ const methodsByContractName = {
   const web3 = new Web3(INFURA_API_URL);
 
   let res;
-  res = await Contract.find({}).exec().catch(console.log);
+  res = await Contract.find({}).exec().catch(console.error);
   const contractByName = res.reduce(
     (prev, curr) => ({
       ...prev,
@@ -80,12 +102,14 @@ const methodsByContractName = {
       fast: Math.ceil(res.data.data.list[1].gasPrice * 1e-9),
       standard: Math.ceil(res.data.data.list[2].gasPrice * 1e-9),
       slow: Math.ceil(res.data.data.list[3].gasPrice * 1e-9),
-    }).catch(console.log);
+    }).catch(console.error);
   };
 
   const getGasUsed = async () => {
-    await Promise.all(
-      Object.entries(methodsByContractName).map(async ([name, methods]) => {
+    await Object.entries(methodsByContractName).reduce(
+      async (prevPromise, [name, methods]) => {
+        await prevPromise;
+
         const contract = contractByName[name];
         const web3Contract = new web3.eth.Contract(
           JSON.parse(contract.abi),
@@ -107,7 +131,7 @@ const methodsByContractName = {
 
         const numTxs = 1000;
         res = await axios.get(
-          `https://api.etherscan.io/api?module=account&action=txlist&address=${web3Contract.options.address}&startblock=0&endblock=99999999&sort=desc&apikey=${ETHERSCAN_API_KEY}&offset=${numTxs}&page=0`,
+          `https://api.etherscan.io/api?module=account&action=txlist&address=${web3Contract.options.address}&startblock=0&endblock=99999999&sort=desc&apikey=${ETHERSCAN_API_KEY}&offset=${numTxs}&page=1`,
         );
 
         const txsByMethod = methods.reduce(
@@ -149,7 +173,7 @@ const methodsByContractName = {
             if (count === 0) {
               // TODO: It is very unlikely that things could be this bad, may
               // need a last resort.
-              console.log(contract.name, method);
+              console.error(contract.name, method);
               return;
             }
             const avgGasUsed = Math.ceil(sum / count);
@@ -157,15 +181,16 @@ const methodsByContractName = {
               contract: contract._id,
               method,
               amount: avgGasUsed,
-            }).catch(console.log);
+            }).catch(console.error);
           }),
         );
-      }),
+      },
+      Promise.resolve(),
     );
   };
 
   const sendNotifications = async (gasPrice) => {
-    const users = await User.find({}).exec().catch(console.log);
+    const users = await User.find({}).exec().catch(console.error);
     const emails = users
       .filter((u) => u.isToNotifyWhen24HLow)
       .map((u) => u.email);
@@ -186,7 +211,7 @@ const methodsByContractName = {
               resolve();
             },
           );
-        }).catch(console.log),
+        }).catch(console.error),
       ),
     );
   };
@@ -201,7 +226,7 @@ const methodsByContractName = {
         Math.ceil(CHECK_LOWEST_GAS_PERIOD_IN_SEC / GET_GAS_PRICE_PERIOD_IN_SEC),
       )
       .exec()
-      .catch(console.log);
+      .catch(console.error);
     let lowest = 1e9;
     gasPrices.forEach((p) => {
       if (p.fast < lowest) {
