@@ -1,284 +1,260 @@
-const https = require('https');
 const Koa = require('koa');
-const logger = require('koa-logger');
 const bodyParser = require('koa-body');
 const cors = require('@koa/cors');
 const mongoose = require('mongoose');
 const axios = require('axios').default;
-const Web3 = require('web3');
+const winston = require('winston');
 const mailgun = require('mailgun-js');
 
 const router = require('./router');
 
 const GasPrice = require('./models/GasPrice');
-const GasUsed = require('./models/GasUsed');
-const Contract = require('./models/Contract');
+const Transaction = require('./models/Transaction');
 const User = require('./models/User');
+const { supportedContracts } = require('./constants');
 
 const {
+  NODE_ENV = 'production',
   PORT = '3000',
-  GET_GAS_PRICE_PERIOD_IN_SEC,
-  GET_GAS_USED_PERIOD_IN_SEC,
-  CHECK_LOWEST_GAS_PERIOD_IN_SEC,
   MONGODB_URI,
-  INFURA_API_URL,
   ETHERSCAN_API_KEY,
   MAILGUN_API_KEY,
   MAILGUN_DOMAIN,
 } = process.env;
 
-const methodsByContractName = {
-  yearn__vault__yCrv: ['deposit', 'withdraw'],
-  yearn__vault__weth: ['deposit', 'withdraw'],
-  yearn__vault__yfi: ['deposit', 'withdraw'],
-  yearn__vault__yBCrv: ['deposit', 'withdraw'],
-  yearn__vault__crvRenWSBtc: ['deposit', 'withdraw'],
-  yearn__vault__dai: ['deposit', 'withdraw'],
-  yearn__vault__tusd: ['deposit', 'withdraw'],
-  yearn__vault__usdc: ['deposit', 'withdraw'],
-  yearn__vault__usdt: ['deposit', 'withdraw'],
-  yearn__vault__aLink: ['deposit', 'withdraw'],
-  curve__pool__y: ['add_liquidity', 'remove_liquidity'],
-  curve__pool__compound: ['add_liquidity', 'remove_liquidity'],
-  curve__pool__pax: ['add_liquidity', 'remove_liquidity'],
-  curve__pool__bUsd: ['add_liquidity', 'remove_liquidity'],
-  curve__pool__sUsd: ['add_liquidity', 'remove_liquidity'],
-  curve__pool__renBtc: ['mintThenDeposit', 'removeLiquidityThenBurn'],
-  curve__pool__sBtc: ['mintThenDeposit', 'removeLiquidityThenBurn'],
-  curveDao__gauge__yCrv: ['deposit', 'withdraw'],
-  curveDao__gauge__cCrv: ['deposit', 'withdraw'],
-  curveDao__gauge__yBCrv: ['deposit', 'withdraw'],
-  curveDao__gauge__crvPlain3AndSUsd: ['deposit', 'withdraw'],
-  curveDao__gauge__yPaxCrv: ['deposit', 'withdraw'],
-  curveDao__gauge__crvRenWBtc: ['deposit', 'withdraw'],
-  curveDao__gauge__crvRenWSBtc: ['deposit', 'withdraw'],
-  curveDao__minter: ['mint'],
-  uniswap__router: [
-    'swapExactETHForTokens',
-    'addLiquidityETH',
-    'removeLiquidityETH',
-  ],
-  sushiswap__pool: ['deposit', 'withdraw'],
-  weth: ['transfer', 'approve'],
-  usdt: ['transfer', 'approve'],
-  dai: ['transfer', 'approve'],
-};
+const logger = winston.createLogger({
+  level: NODE_ENV === 'production' ? 'info' : 'silly',
+  transports: [new winston.transports.Console()],
+  format: winston.format.combine(
+    winston.format.label(),
+    winston.format.timestamp(),
+    winston.format.json(),
+  ),
+});
 
 (async () => {
-  mongoose.connect(MONGODB_URI);
-
-  const mg = mailgun({ apiKey: MAILGUN_API_KEY, domain: MAILGUN_DOMAIN });
-
-  const server = new Koa();
-
-  server.use(logger());
-  server.use(cors());
-  server.use(bodyParser());
-
-  server.use(router.routes());
-
-  server.listen(parseInt(PORT, 10));
-
-  const web3 = new Web3(INFURA_API_URL);
-
-  let res;
-  res = await Contract.find({}).exec().catch(console.error);
-  const contractByName = res.reduce(
-    (prev, curr) => ({
-      ...prev,
-      [curr.name]: curr,
-    }),
-    {},
-  );
-
-  const getGasPrice = async () => {
-    res = await axios.get('https://www.gasnow.org/api/v2/gas/price', {
-      httpsAgent: new https.Agent({
-        rejectUnauthorized: false,
-      }),
+  try {
+    mongoose.connect(MONGODB_URI, {
+      useNewUrlParser: true,
+      useFindAndModify: true,
+      useCreateIndex: true,
+      useUnifiedTopology: true,
     });
-    await GasPrice.create({
-      instant: Math.ceil(res.data.data.list[0].gasPrice * 1e-9),
-      fast: Math.ceil(res.data.data.list[1].gasPrice * 1e-9),
-      standard: Math.ceil(res.data.data.list[2].gasPrice * 1e-9),
-      slow: Math.ceil(res.data.data.list[3].gasPrice * 1e-9),
-    }).catch(console.error);
-  };
 
-  const getGasUsed = async () => {
-    await Object.entries(methodsByContractName).reduce(
-      async (prevPromise, [name, methods]) => {
-        await prevPromise;
+    let res;
 
-        const contract = contractByName[name];
-        const web3Contract = new web3.eth.Contract(
-          JSON.parse(contract.abi),
-          contract.address,
-        );
+    const getGasPrice = async () => {
+      logger.info('Fetching the current gas price...');
 
-        const methodBySig = web3Contract.options.jsonInterface.reduce(
-          (prev, curr) => {
-            if (!methods.includes(curr.name)) {
-              return prev;
-            }
-            return {
-              ...prev,
-              [curr.signature]: curr.name,
-            };
-          },
-          {},
-        );
+      res = await axios.get('https://www.gasnow.org/api/v2/gas/price');
 
-        const numTxs = 1000;
-        res = await axios.get(
-          `https://api.etherscan.io/api?module=account&action=txlist&address=${web3Contract.options.address}&startblock=0&endblock=99999999&sort=desc&apikey=${ETHERSCAN_API_KEY}&offset=${numTxs}&page=1`,
-        );
+      logger.debug(JSON.stringify(res.data));
+      logger.info('Fetched');
 
-        const txsByMethod = methods.reduce(
-          (prev, curr) => ({
-            ...prev,
-            [curr]: [],
-          }),
-          {},
-        );
-        res.data.result.forEach((tx) => {
-          const method = methodBySig[tx.input.slice(0, 10)];
-          if (!methods.includes(method)) {
-            return;
+      logger.info('Saving the current gas price...');
+
+      await GasPrice.create({
+        instant: Math.ceil(res.data.data.list[0].gasPrice * 1e-9),
+        fast: Math.ceil(res.data.data.list[1].gasPrice * 1e-9),
+        standard: Math.ceil(res.data.data.list[2].gasPrice * 1e-9),
+        slow: Math.ceil(res.data.data.list[3].gasPrice * 1e-9),
+        timestamp: res.data.data.timestamp,
+      });
+
+      logger.info('Saved');
+    };
+
+    const maxNumReqsPerSec = 5;
+    const getTxs = async () => {
+      logger.info('Fetching transactions for supported contracts...');
+
+      const txs = await supportedContracts
+        .reduce((prev, { address }, idx) => {
+          const result = [...prev];
+          if (idx % maxNumReqsPerSec === 0) {
+            result.push([]);
           }
-          txsByMethod[method].push(tx);
-        });
+          result[result.length - 1].push({ address });
+          return result;
+        }, [])
+        .reduce(async (prevPromise, contractsGroup) => {
+          const prevResult = await prevPromise;
+          await new Promise((resolve) => {
+            setTimeout(resolve, 1 * 1000);
+          });
 
-        await Promise.all(
-          Object.entries(txsByMethod).map(async ([method, txs]) => {
-            let sum = 0;
-            let count = 0;
-            txs.forEach((tx) => {
-              if (
-                parseInt(tx.timeStamp, 10) <
-                Math.ceil(Date.now() / 1000) -
-                  parseInt(GET_GAS_USED_PERIOD_IN_SEC, 10)
-              ) {
-                return;
+          const result = await Promise.all(
+            contractsGroup.map(async ({ address }) => {
+              res = await axios.get(
+                `https://api.etherscan.io/api?module=account&action=txlist&address=${address}&sort=desc&apikey=${ETHERSCAN_API_KEY}`,
+              );
+              logger.debug(JSON.stringify(res.data));
+              logger.debug(
+                `Fetched ${res.data.result.length} transactions for ${address}`,
+              );
+              if (res.data.status === '0') {
+                throw new Error(res.data.result);
               }
-              sum += parseInt(tx.gasUsed, 10);
-              count += 1;
-            });
-            if (count === 0) {
-              txs.forEach((tx) => {
-                sum += parseInt(tx.gasUsed, 10);
-                count += 1;
-              });
-            }
-            if (count === 0) {
-              // TODO: It is very unlikely that things could be this bad, may
-              // need a last resort.
-              console.error(contract.name, method);
-              return;
-            }
-            const avgGasUsed = Math.ceil(sum / count);
-            await GasUsed.create({
-              contract: contract._id,
-              method,
-              amount: avgGasUsed,
-            }).catch(console.error);
-          }),
-        );
-      },
-      Promise.resolve(),
-    );
-  };
 
-  const sendNotifications = async (gasPrice) => {
-    const users = await User.find({}).exec().catch(console.error);
-    const emails = users
-      .filter((u) => u.isToNotifyWhen24HLow)
-      .map((u) => u.email);
-    await Promise.all(
-      emails.map((email) =>
-        new Promise((resolve) => {
-          mg.messages().send(
-            {
-              from: 'Feel the Fee <contact@mg.fee.finance>',
-              to: email,
-              subject: `⛽ ${gasPrice} Gwei | Time to get some cheap gas!`,
-              text: `The gas price now (${gasPrice} Gwei) is the lowest of the last 24 hours!`,
-            },
-            (err) => {
-              if (err) {
-                throw err;
-              }
-              resolve();
-            },
+              return res.data.result.filter((tx) => tx.isError === '0');
+            }),
           );
-        }).catch(console.error),
-      ),
-    );
-  };
 
-  let lowestLast24H = 1e9;
-  let isFirst = true;
-  const checkLowestGas = async () => {
-    const now = new Date();
-    const gasPrices = await GasPrice.find({})
-      .sort({ createdAt: -1 })
-      .limit(
-        Math.ceil(CHECK_LOWEST_GAS_PERIOD_IN_SEC / GET_GAS_PRICE_PERIOD_IN_SEC),
-      )
-      .exec()
-      .catch(console.error);
-    let lowest = 1e9;
-    gasPrices.forEach((p) => {
-      if (p.fast < lowest) {
-        lowest = p.fast;
+          return [...prevResult, ...result.flat()];
+        }, Promise.resolve([]));
+
+      logger.info('Fetched');
+
+      logger.info('Saving the transactions...');
+
+      await Promise.all(
+        txs.map(
+          async ({
+            hash,
+            from,
+            to,
+            input,
+            gasPrice,
+            gas,
+            gasUsed,
+            timeStamp,
+          }) =>
+            Transaction.findOneAndUpdate(
+              { hash },
+              {
+                $setOnInsert: {
+                  from,
+                  to,
+                  input,
+                  gas: {
+                    price: Math.ceil(parseInt(gasPrice, 10) * 1e-9),
+                    limit: parseInt(gas, 10),
+                    used: parseInt(gasUsed, 10),
+                  },
+                  timestamp: parseInt(timeStamp, 10),
+                },
+              },
+              { upsert: true },
+            ).exec(),
+        ),
+      );
+
+      logger.info('Saved');
+    };
+
+    const mg = mailgun({ apiKey: MAILGUN_API_KEY, domain: MAILGUN_DOMAIN });
+    const sendNotifications = async (gasPrice) => {
+      logger.info('Sending email notifications...');
+
+      const users = await User.find({}).exec();
+      const emails = users
+        .filter((user) => user.isToNotifyWhen24HLow)
+        .map((user) => user.email);
+      await Promise.all(
+        emails.map(
+          (email) =>
+            new Promise((resolve) => {
+              mg.messages().send(
+                {
+                  from: 'Feel the Fee <contact@fee.finance>',
+                  to: email,
+                  subject: `⛽ ${gasPrice.standard} Gwei | Time to get some cheap gas!`,
+                  text: `
+The standard gas price now (${gasPrice.standard} Gwei) is the lowest within the last 24 hours!
+
+Instant: ${gasPrice.instant} Gwei
+Fast: ${gasPrice.fast} Gwei
+Standard: ${gasPrice.standard} Gwei
+Slow: ${gasPrice.slow} Gwei
+
+Visit https://fee.finance for more.
+`,
+                },
+                (err) => {
+                  if (err) {
+                    throw err;
+                  }
+                  resolve();
+                },
+              );
+            }),
+        ),
+      );
+
+      logger.info('Sent');
+    };
+
+    const checkLowestGas = async () => {
+      logger.info('Checking if the gas price is at 24-hour low...');
+
+      const gasPrices = await GasPrice.find({})
+        .sort({ timestamp: -1 })
+        .limit(24 * 60)
+        .exec();
+      let lowest = 1e9;
+      gasPrices.forEach((gasPrice) => {
+        if (gasPrice.standard < lowest) {
+          lowest = gasPrice.standard;
+        }
+      });
+      if (gasPrices[0].standard <= lowest) {
+        logger.debug(
+          `The current standard gas price ${lowest} is at 24-hour low`,
+        );
+        sendNotifications(gasPrices[0]);
       }
+
+      logger.info('Checked');
+    };
+
+    const now = new Date();
+    let startTime;
+    startTime = new Date(now.getTime());
+    startTime.setMinutes(now.getMinutes() + 1);
+    startTime.setSeconds(0);
+    startTime.setMilliseconds(0);
+    setTimeout(() => {
+      getGasPrice();
+      setInterval(getGasPrice, 60 * 1000);
+    }, startTime.valueOf() - now.valueOf());
+
+    startTime = new Date(now.getTime());
+    startTime.setMinutes(now.getMinutes() + ((60 - now.getMinutes()) % 10));
+    startTime.setSeconds(0);
+    startTime.setMilliseconds(0);
+    setTimeout(() => {
+      getTxs();
+      setInterval(getTxs, 10 * 60 * 1000);
+    }, startTime.valueOf() - now.valueOf());
+
+    startTime = new Date(now.getTime());
+    startTime.setMinutes(now.getMinutes() + ((60 - now.getMinutes()) % 10));
+    startTime.setSeconds(0);
+    startTime.setMilliseconds(0);
+    setTimeout(() => {
+      checkLowestGas();
+      setInterval(checkLowestGas, 10 * 60 * 1000);
+    }, startTime.valueOf() - now.valueOf());
+
+    const server = new Koa();
+
+    server.use(async (ctx, next) => {
+      logger.http(ctx.req);
+      await next();
+      logger.http(ctx.res);
     });
-    if (now.getHours() === 0) {
-      lowestLast24H = lowest;
-    } else if (isFirst) {
-      lowestLast24H = lowest;
-      isFirst = false;
-    } else if (lowest < lowestLast24H) {
-      lowestLast24H = lowest;
-      sendNotifications(lowest);
-    }
-  };
 
-  getGasPrice();
-  getGasUsed();
+    server.use(cors());
+    server.use(bodyParser());
+    server.use(router.routes());
 
-  const now = new Date();
-  let startTime;
-  startTime = new Date(now);
-  startTime.setHours(now.getHours() + 1);
-  startTime.setMinutes(0);
-  startTime.setSeconds(0);
-  startTime.setMilliseconds(0);
-  setTimeout(() => {
-    getGasPrice();
-    setInterval(getGasPrice, parseInt(GET_GAS_PRICE_PERIOD_IN_SEC, 10) * 1000);
-  }, startTime.valueOf() - now.valueOf());
+    server.listen(parseInt(PORT, 10));
+    server.on('error', (err) => {
+      logger.error(err);
+    });
 
-  startTime = new Date(now);
-  startTime.setHours(now.getHours() + 1);
-  startTime.setMinutes(0);
-  startTime.setSeconds(0);
-  startTime.setMilliseconds(0);
-  setTimeout(() => {
-    getGasUsed();
-    setInterval(getGasUsed, parseInt(GET_GAS_USED_PERIOD_IN_SEC, 10) * 1000);
-  }, startTime.valueOf() - now.valueOf());
-
-  startTime = new Date(now);
-  startTime.setHours(now.getHours() + 1);
-  startTime.setMinutes(0);
-  startTime.setSeconds(0);
-  startTime.setMilliseconds(0);
-  setTimeout(() => {
-    checkLowestGas();
-    setInterval(
-      checkLowestGas,
-      parseInt(CHECK_LOWEST_GAS_PERIOD_IN_SEC, 10) * 1000,
-    );
-  }, startTime.valueOf() - now.valueOf());
+    logger.info(`Listening on port: ${PORT}...`);
+  } catch (err) {
+    logger.error(err);
+  }
 })();

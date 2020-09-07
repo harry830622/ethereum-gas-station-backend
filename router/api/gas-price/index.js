@@ -5,19 +5,22 @@ const GasPrice = require('../../../models/GasPrice');
 const gasPriceRouter = new Router();
 
 gasPriceRouter.get('/', async (ctx) => {
+  const { limit = 10000 } = ctx.query;
+  const maxLimit = 10000;
   const gasPrices = await GasPrice.find({})
-    .sort({ createdAt: -1 })
+    .sort({ timestamp: -1 })
+    .limit(Math.min(maxLimit, limit))
     .exec()
     .catch((err) => {
-      ctx.throw(404, err.message);
+      ctx.throw(400, err);
     });
   ctx.status = 200;
-  ctx.body = gasPrices.map((p) => ({
-    instant: p.instant,
-    fast: p.fast,
-    standard: p.standard,
-    slow: p.slow,
-    timestamp: Date.parse(p.createdAt) * 1e-3,
+  ctx.body = gasPrices.map(({ instant, fast, standard, slow, timestamp }) => ({
+    instant,
+    fast,
+    standard,
+    slow,
+    timestamp,
   }));
 });
 

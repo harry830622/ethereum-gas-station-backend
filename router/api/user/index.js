@@ -8,7 +8,7 @@ userRouter.post('/', async (ctx) => {
   const { email, isToNotifyWhen24HLow } = ctx.request.body;
   const user = { email, isToNotifyWhen24HLow };
   await User.create(user).catch((err) => {
-    ctx.throw(400, err.message);
+    ctx.throw(400, err);
   });
   ctx.status = 200;
 });
