@@ -12,7 +12,7 @@ const transactionSchema = new Schema({
     limit: { type: Schema.Types.Number, required: true },
     used: { type: Schema.Types.Number, required: true },
   },
-  timestamp: { type: Schema.Types.Number, required: true },
+  timestamp: { type: Schema.Types.Date, required: true, expires: '1d' },
 });
 
 transactionSchema.index({ timestamp: -1 });

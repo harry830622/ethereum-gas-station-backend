@@ -44,37 +44,37 @@ const logger = winston.createLogger({
     let res;
 
     const getGasPrice = async () => {
-      logger.info('Fetching the current gas price...');
+      logger.info('Fetching current gas price...');
 
       res = await axios.get('https://www.gasnow.org/api/v2/gas/price');
 
       logger.debug(JSON.stringify(res.data));
-      logger.info('Fetched');
+      logger.info('Fetched current gas price');
 
-      logger.info('Saving the current gas price...');
+      logger.info('Saving current gas price...');
 
       await GasPrice.create({
         instant: Math.ceil(res.data.data.list[0].gasPrice * 1e-9),
         fast: Math.ceil(res.data.data.list[1].gasPrice * 1e-9),
         standard: Math.ceil(res.data.data.list[2].gasPrice * 1e-9),
         slow: Math.ceil(res.data.data.list[3].gasPrice * 1e-9),
-        timestamp: res.data.data.timestamp,
+        timestamp: new Date(res.data.data.timestamp),
       });
 
-      logger.info('Saved');
+      logger.info('Saved current gas price');
     };
 
     const maxNumReqsPerSec = 5;
     const getTxs = async () => {
       logger.info('Fetching transactions for supported contracts...');
 
-      const txs = await supportedContracts
-        .reduce((prev, { address }, idx) => {
+      const txsByContractName = await supportedContracts
+        .reduce((prev, { address, name }, idx) => {
           const result = [...prev];
           if (idx % maxNumReqsPerSec === 0) {
             result.push([]);
           }
-          result[result.length - 1].push({ address });
+          result[result.length - 1].push({ address, name });
           return result;
         }, [])
         .reduce(async (prevPromise, contractsGroup) => {
@@ -84,62 +84,86 @@ const logger = winston.createLogger({
           });
 
           const result = await Promise.all(
-            contractsGroup.map(async ({ address }) => {
+            contractsGroup.map(async ({ address, name }) => {
               res = await axios.get(
                 `https://api.etherscan.io/api?module=account&action=txlist&address=${address}&sort=desc&apikey=${ETHERSCAN_API_KEY}`,
               );
               logger.debug(JSON.stringify(res.data));
               logger.debug(
-                `Fetched ${res.data.result.length} transactions for ${address}`,
+                `Fetched ${res.data.result.length} transactions for ${name}`,
               );
               if (res.data.status === '0') {
                 throw new Error(res.data.result);
               }
 
-              return res.data.result.filter((tx) => tx.isError === '0');
+              return [name, res.data.result];
             }),
           );
 
-          return [...prevResult, ...result.flat()];
-        }, Promise.resolve([]));
+          return {
+            ...prevResult,
+            ...result.reduce(
+              (prev, [name, txs]) => ({ ...prev, [name]: txs }),
+              {},
+            ),
+          };
+        }, Promise.resolve({}));
 
-      logger.info('Fetched');
+      logger.info('Fetched transactions');
 
-      logger.info('Saving the transactions...');
+      const txsToSave = Object.values(txsByContractName)
+        .map((txs) =>
+          txs.map(
+            ({ hash, from, to, input, gasPrice, gas, gasUsed, timeStamp }) => ({
+              hash,
+              from,
+              to,
+              input,
+              gas: {
+                price: Math.ceil(parseInt(gasPrice, 10) * 1e-9),
+                limit: parseInt(gas, 10),
+                used: parseInt(gasUsed, 10),
+              },
+              timestamp: new Date(parseInt(timeStamp, 10) * 1000),
+            }),
+          ),
+        )
+        .map((txs) => {
+          const now = new Date();
+          let txsWithinPeriod = [];
+          txs.every((tx) => {
+            const isWithinPeriod =
+              tx.timestamp.getTime() > now.getTime() - 30 * 60 * 1000;
+            if (isWithinPeriod) {
+              txsWithinPeriod = [...txsWithinPeriod, tx];
+            }
+            return isWithinPeriod;
+          });
+          return txsWithinPeriod;
+        })
+        .flat();
+
+      logger.info(`Saving ${txsToSave.length} transactions...`);
 
       await Promise.all(
-        txs.map(
-          async ({
-            hash,
-            from,
-            to,
-            input,
-            gasPrice,
-            gas,
-            gasUsed,
-            timeStamp,
-          }) =>
-            Transaction.findOneAndUpdate(
-              { hash },
-              {
-                $setOnInsert: {
-                  from,
-                  to,
-                  input,
-                  gas: {
-                    price: Math.ceil(parseInt(gasPrice, 10) * 1e-9),
-                    limit: parseInt(gas, 10),
-                    used: parseInt(gasUsed, 10),
-                  },
-                  timestamp: parseInt(timeStamp, 10),
-                },
+        txsToSave.map(async ({ hash, from, to, input, gas, timestamp }) => {
+          await Transaction.findOneAndUpdate(
+            { hash },
+            {
+              $setOnInsert: {
+                from,
+                to,
+                input,
+                gas,
+                timestamp,
               },
-              { upsert: true },
-            ).exec(),
-        ),
+            },
+            { upsert: true },
+          ).exec();
+        }),
       );
 
-      logger.info('Saved');
+      logger.info('Saved transactions');
     };
 
     const mg = mailgun({ apiKey: MAILGUN_API_KEY, domain: MAILGUN_DOMAIN });
@@ -167,7 +191,7 @@ Fast: ${gasPrice.fast} Gwei
 Standard: ${gasPrice.standard} Gwei
 Slow: ${gasPrice.slow} Gwei
 
-Visit https://fee.finance for more.
+Visit https://fee.finance for more info.
 `,
                 },
                 (err) => {

@@ -7,7 +7,7 @@ const gasPriceSchema = new Schema({
   fast: { type: Schema.Types.Number, required: true },
   standard: { type: Schema.Types.Number, required: true },
   slow: { type: Schema.Types.Number, required: true },
-  timestamp: { type: Schema.Types.Number, required: true },
+  timestamp: { type: Schema.Types.Date, required: true },
 });
 
 gasPriceSchema.index({ timestamp: -1 });
